@@ -1,9 +1,9 @@
-{% set version = "18.1.6" %}
+{% set version = "18.1.8" %}
 {% set major_ver = version.split(".")[0] %}
 {% set maj_min = major_ver ~ "." ~ version.split(".")[1] %}
 
 # as of LLVM 17, we expect an "rc" suffix for the release candidates
-{% set extra = "rc" if version.split(".")[-1] not in "01234567" else "" %}
+{% set extra = "rc" if version.split(".")[-1] not in "0123456789" else "" %}
 {% set extra = "git" if version.split(".")[-1] == "dev0" else extra %}
 
 package:
@@ -11,16 +11,18 @@ package:
   version: {{ version }}
 
 source:
-  url: https://github.com/llvm/llvm-project/releases/download/llvmorg-{{ version.replace(".rc", "-rc") }}/llvm-project-{{ version.replace(".rc", "rc") }}.src.tar.xz
-  sha256: bd4b4cb6374bcd5fc5a3ba60cb80425d29da34f316b8821abc12c0db225cf6b4
+  url: https://github.com/llvm/llvm-project/archive/refs/tags/llvmorg-{{ version.replace(".rc", "-rc") }}.tar.gz
+  sha256: 09c08693a9afd6236f27a2ebae62cda656eba19021ef3f94d59e931d662d4856
   patches:
     # - patches/intel-D47188-svml-VF.patch    # Fixes vectorizer and extends SVML support
     # - patches/expect-fastmath-entrypoints-in-add-TLI-mappings.ll.patch # adjusts test added in 10.0.0 for intel-D47188-svml-VF.patch effects
     # - patches/amd-roc-2.7.0.diff
     - patches/0001-pass-through-QEMU_LD_PREFIX-SDKROOT.patch
+    # backport https://github.com/llvm/llvm-project/pull/90599
+    - patches/0002-lljit-respect-codemodel.patch
 
 build:
-  number: 0
+  number: 2
   merge_build_host: false
 
 requirements:
@@ -147,6 +149,41 @@ outputs:
       commands:
         - echo "Hello World!"
 
+  # Contains LLVM tools with a version suffix
+  - name: llvm-tools-{{ major_ver }}
+    script: install_llvm.sh   # [unix]
+    script: install_llvm.bat  # [win]
+    build:
+      activate_in_script: true
+      # On Windows there are no symlinks and copying will create a new package
+      # that is 300MB+
+      skip: true  # [win]
+    requirements:
+      build:
+        - {{ stdlib('c') }}
+        - {{ compiler('cxx') }}
+        - cmake
+        - ninja
+        - python >=3
+        - libcxx {{ cxx_compiler_version }}  # [osx]
+      host:
+        - libcxx {{ cxx_compiler_version }}  # [osx]
+        - {{ pin_subpackage("libllvm" ~ major_ver, exact=True) }}
+        - libxml2
+        - zlib
+        - zstd
+      run:
+        - {{ pin_subpackage("libllvm" + major_ver, exact=True) }}
+    test:
+      commands:
+        - $PREFIX/bin/llc-{{ major_ver }} -version                               # [not win]
+        # The test for windows is split into two lines instead of having it in one line
+        # like its unix variant because of a YAML parsing issue.
+        - if not exist "%LIBRARY_BIN%"\\llc-{{ major_ver }}.exe exit 1           # [win]
+        - llc-{{ major_ver }} -version                                           # [win]
+        - test ! -f $PREFIX/bin/llvm-config-{{ major_ver }}                      # [not win]
+        - if exist "%LIBRARY_BIN%"\\llvm-config-{{ major_ver }}.exe exit 1       # [win]
+
   # Contains LLVM tools
   - name: llvm-tools
     script: install_llvm.sh   # [unix]
@@ -164,11 +201,13 @@ outputs:
       host:
         - libcxx {{ cxx_compiler_version }}  # [osx]
         - {{ pin_subpackage("libllvm" + major_ver, exact=True) }}
+        - {{ pin_subpackage("llvm-tools-" ~ major_ver, exact=True) }}   # [not win]
         - libxml2
         - zlib
         - zstd
       run:
         - {{ pin_subpackage("libllvm" + major_ver, exact=True) }}
+        - {{ pin_subpackage("llvm-tools-" ~ major_ver, exact=True) }}   # [not win]
       run_constrained:
         - llvm        {{ version }}
         - llvmdev     {{ version }}
@@ -177,8 +216,12 @@ outputs:
     test:
       commands:
         - $PREFIX/bin/llc -version                               # [not win]
+        # The test for windows is split into two lines instead of having it in one line
+        # like its unix variant because of a YAML parsing issue.
         - if not exist "%LIBRARY_BIN%"\\llc.exe exit 1           # [win]
         - llc -version                                           # [win]
+        - test ! -f $PREFIX/bin/llvm-config                      # [not win]
+        - if exist "%LIBRARY_BIN%"\\llvm-config.exe exit 1       # [win]
 
   # Contains LLVM-C shared library
   - name: libllvm-c{{ major_ver }}
@@ -229,7 +272,7 @@ outputs:
         - python >=3
         - pip
       run:
-        - python
+        - python >=3
     test:
       imports:
         - lit
