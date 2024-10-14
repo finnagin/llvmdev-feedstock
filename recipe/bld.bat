@@ -67,6 +67,10 @@ cmake -G "Ninja" ^
     -DLLVM_BUILD_LLVM_C_DYLIB=ON ^
     -DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD=WebAssembly ^
     -DCMAKE_POLICY_DEFAULT_CMP0111=NEW ^
+    -DCMAKE_LINKER=%stage0_bin_dir%/lld-link.exe ^
+    -DCMAKE_AR=%stage0_bin_dir%/llvm-lib.exe ^
+    -DCMAKE_RC=%stage0_bin_dir%/llvm-windres.exe ^
+    -DCPACK_SYSTEM_NAME=woa64
     %SRC_DIR%/llvm
 if %ERRORLEVEL% neq 0 exit 1
 
